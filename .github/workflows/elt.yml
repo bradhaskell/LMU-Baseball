@@ -1,0 +1,46 @@
+name: EL - Google Sheets (extract-only if no DB)
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "15 9 * * *"
+
+jobs:
+  run-elt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Optional: use service account for private sheet later
+      - name: Prepare Google creds
+        if: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON != '' }}
+        run: |
+          echo "${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}" > $HOME/creds.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS_JSON=$(cat $HOME/creds.json)" >> $GITHUB_ENV
+
+      - name: Run extract
+        env:
+          GSHEET_ID: ${{ secrets.GSHEET_ID }}
+          GSHEET_TAB_NAME: ${{ secrets.GSHEET_TAB_NAME }}
+          GSHEET_GID: ${{ secrets.GSHEET_GID }}
+          RAW_TABLE: raw_cauldron_scoreboard
+          # DATABASE_URL omitted on purpose => dry run
+          GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}
+        run: |
+          python -m etl.google_sheets_extract_load_raw
+
+      - name: Upload extract artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cauldron_extract
+          path: data/raw/*.csv
+          if-no-files-found: warn
