@@ -1,4 +1,4 @@
-name: Run Basket Craft Extract and Load to Raw
+name: Run google_sheets_extract_load_raw
 
 on:
   schedule:
@@ -36,6 +36,6 @@ jobs:
       - name: Show installed packages
         run: pip list
 
-      - name: Extract and load products to raw schema 
+      - name: Extract and load results to raw schema 
         run: |
-          python elt/basket_craft_products_extract_load_raw.py
+          python elt/google_sheets_extract_load_raw
