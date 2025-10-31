@@ -38,4 +38,4 @@ jobs:
 
       - name: Extract and load results to raw schema 
         run: |
-          python elt/google_sheets_extract_load_raw
+          python elt/google_sheets_extract_load_raw.py
