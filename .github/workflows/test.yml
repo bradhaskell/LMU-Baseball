@@ -1,0 +1,41 @@
+name: Run Basket Craft Extract and Load to Raw
+
+on:
+  schedule:
+    - cron: '*/15 * * * *' # runs every 15 minutes
+  workflow_dispatch:       # optional manual trigger
+
+env:
+  MYSQL_USER:    ${{ secrets.MYSQL_USER }}
+  MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}
+  MYSQL_HOST:    ${{ secrets.MYSQL_HOST }}
+  MYSQL_DB:      ${{ secrets.MYSQL_DB }}
+  GSHEET_ID:       ${{ secrets.GSHEET_ID }}
+  GSHEET_TAB_NAME:   ${{ secrets.GSHEET_TAB_NAME }}
+  GOOGLE_APPLICATION_CREDENTIALS_JSON:       ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}
+  RAW_TABLE:         ${{ secrets.RAW_TABLE }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+      
+      - name: Set up python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+      
+      - name: Install python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Show installed packages
+        run: pip list
+
+      - name: Extract and load products to raw schema 
+        run: |
+          python elt/basket_craft_products_extract_load_raw.py
