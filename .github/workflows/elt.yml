@@ -2,9 +2,9 @@
 name: LMU Baseball ETL
 
 on:
-  workflow_dispatch: {}          # manual trigger
+  workflow_dispatch: {}
   schedule:
-    - cron: '10 13 * * 1-6'      # Mon–Sat 13:10 UTC (06:10 PT)
+    - cron: '10 13 * * 1-6'   # Mon–Sat 13:10 UTC
 
 concurrency:
   group: lmu-baseball-etl
@@ -29,19 +29,30 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # Write the Google service account JSON from a secret to a temp file
+      # Write SA JSON from secret to a temp file (only if secret is set)
       - name: Write Google creds file
-        if: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON != '' }}
+        env:
+          GOOGLE_CREDS_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}
         run: |
-          echo '${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}' > "$RUNNER_TEMP/gcreds.json"
-          echo "GOOGLE_APPLICATION_CREDENTIALS_JSON=$RUNNER_TEMP/gcreds.json" >> "$GITHUB_ENV"
+          if [ -n "$GOOGLE_CREDS_JSON" ]; then
+            echo "$GOOGLE_CREDS_JSON" > "$RUNNER_TEMP/gcreds.json"
+            echo "GOOGLE_APPLICATION_CREDENTIALS_JSON=$RUNNER_TEMP/gcreds.json" \
+              >> "$GITHUB_ENV"
+            python - <<'PY'
+import json, os
+p = os.environ["RUNNER_TEMP"] + "/gcreds.json"
+with open(p, "r", encoding="utf-8") as f:
+    j = json.load(f)
+print("✅ Google SA email:", j.get("client_email", "<missing>"))
+PY
+          else
+            echo "ℹ️ No GOOGLE_APPLICATION_CREDENTIALS_JSON; skipping."
+          fi
 
-      # Mask the DB password in logs (defense in depth)
       - name: Mask MySQL password
         if: ${{ secrets.MYSQL_PASSWORD != '' }}
         run: echo "::add-mask::${{ secrets.MYSQL_PASSWORD }}"
 
-      # Export runtime env vars for the ETL script
       - name: Export ETL env
         run: |
           {
@@ -58,7 +69,6 @@ jobs:
       - name: Run ETL (Google Sheets → MySQL)
         run: python etl/google_sheets_extract_load_raw.py
 
-      # Optional: sanity check row count (quiet; no SQL printed)
       - name: Row count check (optional)
         if: ${{ always() }}
         env:
@@ -69,18 +79,21 @@ jobs:
           MYSQL_DB: ${{ secrets.MYSQL_DB }}
         run: |
           python - <<'PY'
-          import os, pymysql
-          host = os.environ["MYSQL_HOST"]
-          user = os.environ["MYSQL_USER"]
-          pw   = os.environ["MYSQL_PASSWORD"]
-          db   = os.environ["MYSQL_DB"]
-          tbl  = os.environ.get("SQL_TABLE", "raw_cauldron_scoreboard")
-          try:
-              conn = pymysql.connect(host=host, user=user, password=pw, database=db, port=3306)
-              with conn.cursor() as cur:
-                  cur.execute(f"SELECT COUNT(*) FROM `{tbl}`")
-                  print("Rows in", tbl, ":", cur.fetchone()[0])
-              conn.close()
-          except Exception as e:
-              print("Row count check skipped:", e)
-          PY
+import os, pymysql
+tbl = os.environ.get("SQL_TABLE", "raw_cauldron_scoreboard")
+try:
+    conn = pymysql.connect(
+        host=os.environ["MYSQL_HOST"],
+        user=os.environ["MYSQL_USER"],
+        password=os.environ["MYSQL_PASSWORD"],
+        database=os.environ["MYSQL_DB"],
+        port=3306,
+        connect_timeout=10,
+    )
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT COUNT(*) FROM `{tbl}`")
+        print("Rows in", tbl, ":", cur.fetchone()[0])
+    conn.close()
+except Exception as e:
+    print("Row count check skipped:", e)
+PY
