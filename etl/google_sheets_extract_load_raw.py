@@ -256,7 +256,7 @@ def main():
     load_to_mysql(df, RAW_TABLE, DATABASE_URL)
     print(f"🏁 Successfully loaded {len(df)} rows into '{RAW_TABLE}'.")
 
-
+#run code
 if __name__ == "__main__":
     main()
 
