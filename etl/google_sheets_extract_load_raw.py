@@ -62,7 +62,18 @@ def fetch_sheet_gspread(gsheet_id: str, tab_name: str, creds_json: str) -> pd.Da
 
     gc = gspread.authorize(creds)
     ws = gc.open_by_key(gsheet_id).worksheet(tab_name)
-    return pd.DataFrame(ws.get_all_records())
+
+    # --- NEW: grab all values, manually handle header + rows ---
+    all_values = ws.get_all_values()
+    if not all_values:
+        return pd.DataFrame()
+
+    header = [c.strip() for c in all_values[0]]
+    rows = all_values[1:]
+
+    df = pd.DataFrame(rows, columns=header)
+    return df
+
 
 
 def fetch_drive_file_as_dataframe(file_id: str, creds_json: str, sheet_name: str | None = None) -> pd.DataFrame:
@@ -106,13 +117,41 @@ def fetch_drive_file_as_dataframe(file_id: str, creds_json: str, sheet_name: str
 
 # ---------- TRANSFORM ----------
 def coerce_and_align(df: pd.DataFrame) -> pd.DataFrame:
-    """Basic cleanup and column normalization."""
-    df.columns = [c.strip() for c in df.columns]
+    """Basic cleanup and column normalization (no blank or duplicate column names)."""
+
+    # --- Fix/normalize column names ---
+    raw_cols = list(df.columns)
+    normalized = []
+    seen = set()
+
+    for i, c in enumerate(raw_cols):
+        # ensure string + strip
+        c = (str(c) if c is not None else "").strip()
+
+        # replace completely blank names with a synthetic one
+        if c == "":
+            c = f"col_{i+1}"
+
+        # ensure uniqueness (Cauldron can have duplicate headers)
+        base = c
+        suffix = 1
+        while c in seen:
+            c = f"{base}_{suffix}"
+            suffix += 1
+
+        seen.add(c)
+        normalized.append(c)
+
+    df.columns = normalized
+
+    # --- Existing numeric coercions ---
     if "Year" in df.columns:
         df["Year"] = pd.to_numeric(df["Year"], errors="coerce")
     if "Week" in df.columns:
         df["Week"] = pd.to_numeric(df["Week"], errors="coerce")
+
     return df
+
 
 
 # ---------- LOAD HELPERS ----------
@@ -135,11 +174,22 @@ def ensure_table(engine, table_name: str):
 
 
 def load_to_mysql(df: pd.DataFrame, table: str, db_url):
-    """Append data to MySQL."""
-    # If your RDS enforces SSL, add: connect_args={"ssl": {}}
+    """Overwrite and load raw data into MySQL."""
     engine = create_engine(db_url, pool_pre_ping=True)
-    ensure_table(engine, table)
-    df.to_sql(table, engine, if_exists="append", index=False, method="multi", chunksize=1000)
+
+    print(f"📤 Replacing MySQL table '{table}' with latest sheet data...")
+
+    df.to_sql(
+        table,
+        engine,
+        if_exists="replace",  # <-- FULL REBUILD
+        index=False,
+        method="multi",
+        chunksize=1000,
+    )
+
+    print(f"🏁 Successfully replaced '{table}' with {len(df)} rows.")
+
 
 
 def write_extract(df: pd.DataFrame) -> str:
